@@ -3,6 +3,7 @@
 #include "../http2/http2_client.h"
 #include <regex>
 #include <sstream>
+#include <thread>
 #include <arpa/inet.h>
 #include <cstring>
 
@@ -68,6 +69,29 @@ void LiteGrpcChannel::Disconnect() {
         connection_->client->Disconnect();
     }
     connected_ = false;
+}
+
+bool LiteGrpcChannel::WaitForConnected(std::chrono::system_clock::time_point deadline) {
+    // If already connected, return immediately
+    if (IsConnected()) {
+        return true;
+    }
+    
+    // Try to connect if not connected
+    auto status = Connect();
+    if (!status.ok()) {
+        return false;
+    }
+    
+    // Wait for connection with timeout
+    while (std::chrono::system_clock::now() < deadline) {
+        if (IsConnected()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    
+    return IsConnected();
 }
 
 Status LiteGrpcChannel::ExecuteRequest(
@@ -213,12 +237,25 @@ std::shared_ptr<Channel> CreateCustomChannel(
 // gRPC compatibility namespace implementations
 namespace grpc {
 
-std::shared_ptr<Channel> CreateCustomChannel(
+std::shared_ptr<litegrpc::Channel> CreateChannel(
     const std::string& target,
-    std::shared_ptr<ChannelCredentials> creds,
-    const ChannelArguments& args) {
-    
+    std::shared_ptr<litegrpc::ChannelCredentials> creds) {
+    return litegrpc::CreateChannel(target, creds);
+}
+
+std::shared_ptr<litegrpc::Channel> CreateCustomChannel(
+    const std::string& target,
+    std::shared_ptr<litegrpc::ChannelCredentials> creds,
+    const litegrpc::ChannelArguments& args) {
     return litegrpc::CreateCustomChannel(target, creds, args);
+}
+
+std::shared_ptr<litegrpc::ChannelCredentials> SslCredentials(const litegrpc::SslCredentialsOptions& options) {
+    return litegrpc::SslCredentials(options);
+}
+
+std::shared_ptr<litegrpc::ChannelCredentials> InsecureChannelCredentials() {
+    return litegrpc::InsecureChannelCredentials();
 }
 
 } // namespace grpc

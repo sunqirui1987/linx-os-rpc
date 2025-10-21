@@ -3,6 +3,7 @@
 
 #include <string>
 #include <memory>
+#include <chrono>
 #include "litegrpc/core.h"
 #include "litegrpc/status.h"
 #include "litegrpc/credentials.h"
@@ -20,6 +21,7 @@ public:
     virtual bool IsConnected() const = 0;
     virtual Status Connect() = 0;
     virtual void Disconnect() = 0;
+    virtual bool WaitForConnected(std::chrono::system_clock::time_point deadline) = 0;
     
     // Request execution
     virtual Status ExecuteRequest(
@@ -47,12 +49,40 @@ public:
     bool IsConnected() const override;
     Status Connect() override;
     void Disconnect() override;
+    bool WaitForConnected(std::chrono::system_clock::time_point deadline) override;
     
     Status ExecuteRequest(
         const std::string& method,
         ClientContext* context,
         const std::string& request_data,
         std::string* response_data) override;
+    
+    // Protobuf message call method
+    template<typename RequestType, typename ResponseType>
+    Status CallMethod(const std::string& method,
+                     ClientContext& context,
+                     const RequestType& request,
+                     ResponseType* response) {
+        // Serialize request
+        std::string request_data;
+        if (!request.SerializeToString(&request_data)) {
+            return Status::Internal("Failed to serialize request");
+        }
+        
+        // Execute request
+        std::string response_data;
+        auto status = ExecuteRequest(method, &context, request_data, &response_data);
+        if (!status.ok()) {
+            return status;
+        }
+        
+        // Deserialize response
+        if (!response->ParseFromString(response_data)) {
+            return Status::Internal("Failed to parse response");
+        }
+        
+        return Status::OK();
+    }
     
     std::string GetTarget() const override { return target_; }
     std::shared_ptr<ChannelCredentials> GetCredentials() const override { return credentials_; }

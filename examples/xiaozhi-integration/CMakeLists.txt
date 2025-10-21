@@ -34,7 +34,7 @@ include_directories(
 )
 
 # 生成 protobuf 文件
-set(PROTO_PATH "${CMAKE_SOURCE_DIR}/../../proto")
+set(PROTO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../proto")
 set(PROTO_FILES "${PROTO_PATH}/device.proto")
 set(GENERATED_PROTOBUF_PATH "${CMAKE_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY ${GENERATED_PROTOBUF_PATH})

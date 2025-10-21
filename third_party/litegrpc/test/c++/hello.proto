@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package hello;
+
+// nanopb选项，限制字符串长度以适应嵌入式设备
+import "nanopb.proto";
+
+// Hello请求消息
+message HelloRequest {
+    string name = 1 [(nanopb).max_size = 32];
+    string message = 2 [(nanopb).max_size = 128];
+}
+
+// Hello响应消息
+message HelloResponse {
+    string reply = 1 [(nanopb).max_size = 256];
+    int32 status = 2;
+}
+
+// Hello服务定义
+service HelloService {
+    rpc SayHello(HelloRequest) returns (HelloResponse);
+}

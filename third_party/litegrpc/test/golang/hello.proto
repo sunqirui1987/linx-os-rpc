@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package hello;
+
+// Go package 选项
+option go_package = "./hello";
+
+// Hello请求消息
+message HelloRequest {
+    string name = 1;
+    string message = 2;
+}
+
+// Hello响应消息
+message HelloResponse {
+    string reply = 1;
+    int32 status = 2;
+}
+
+// Hello服务定义
+service HelloService {
+    rpc SayHello(HelloRequest) returns (HelloResponse);
+}
