@@ -1,23 +1,119 @@
+/**
+ * @file hello.proto
+ * @brief Hello 服务的 Protocol Buffers 定义文件（Go 版本）
+ * 
+ * 此文件定义了 Hello 服务的消息格式和服务接口，专门用于 Go gRPC 服务器实现。
+ * 与 C++ 版本的主要区别是不包含 nanopb 选项，使用标准的 Go gRPC 生成选项。
+ * 
+ * 特性：
+ * - 使用 Protocol Buffers 3 语法
+ * - 针对 Go 语言优化的包配置
+ * - 与 C++ LiteGRPC 客户端完全兼容
+ * - 支持标准 gRPC 协议
+ * 
+ * 使用场景：
+ * - Go gRPC 服务器开发
+ * - 与 C++ LiteGRPC 客户端的互操作性测试
+ * - 跨语言 gRPC 通信验证
+ * 
+ * 代码生成：
+ *   protoc --go_out=. --go_grpc_out=. hello.proto
+ * 
+ * @author LiteGRPC Team
+ * @date 2024
+ * @version 1.0
+ */
+
 syntax = "proto3";
 
 package hello;
 
-// Go package 选项
+// Go 包选项，指定生成的 Go 代码的包路径
+// 这将在当前目录下的 hello 子目录中生成 Go 代码
 option go_package = "./hello";
 
-// Hello请求消息
+/**
+ * @brief Hello 请求消息
+ * 
+ * 客户端发送给服务器的请求消息，包含发送者信息和消息内容。
+ * 与 C++ 版本相比，此版本不包含 nanopb 长度限制，
+ * 支持更大的字符串长度，适用于服务器端处理。
+ * 
+ * 字段说明：
+ * - name: 发送者姓名（无长度限制）
+ * - message: 消息内容（无长度限制）
+ * 
+ * Go 生成的结构体将包含：
+ * - GetName() string 方法
+ * - GetMessage() string 方法
+ * - 标准的 protobuf 序列化/反序列化方法
+ */
 message HelloRequest {
-    string name = 1;
-    string message = 2;
+    string name = 1;        // 发送者姓名
+    string message = 2;     // 消息内容
 }
 
-// Hello响应消息
+/**
+ * @brief Hello 响应消息
+ * 
+ * 服务器返回给客户端的响应消息，包含回复内容和状态码。
+ * 
+ * 字段说明：
+ * - reply: 服务器的回复消息（无长度限制）
+ * - status: 处理状态码（0表示成功，非0表示各种错误状态）
+ * 
+ * 状态码约定：
+ * - 0: 成功处理
+ * - 1: 一般错误
+ * - 2: 参数错误
+ * - 3: 服务器内部错误
+ * 
+ * Go 生成的结构体将包含：
+ * - GetReply() string 方法
+ * - GetStatus() int32 方法
+ * - 标准的 protobuf 序列化/反序列化方法
+ */
 message HelloResponse {
-    string reply = 1;
-    int32 status = 2;
+    string reply = 1;       // 回复消息
+    int32 status = 2;       // 状态码（0=成功，非0=错误）
 }
 
-// Hello服务定义
+/**
+ * @brief Hello 服务定义
+ * 
+ * 定义了 Hello 服务的 gRPC 接口，提供基本的问候功能。
+ * 此服务将生成标准的 Go gRPC 服务器和客户端代码。
+ * 
+ * 服务方法：
+ * - SayHello: 接收 HelloRequest，返回 HelloResponse
+ * 
+ * Go 代码生成将包含：
+ * - HelloServiceServer 接口（服务器端实现）
+ * - HelloServiceClient 接口（客户端调用）
+ * - RegisterHelloServiceServer 函数（服务注册）
+ * - NewHelloServiceClient 函数（客户端创建）
+ * 
+ * 此服务演示了：
+ * - 标准 gRPC 一元调用模式
+ * - Go 与 C++ 的互操作性
+ * - 跨语言消息传输
+ * - 错误状态处理
+ */
 service HelloService {
+    /**
+     * @brief 发送问候消息
+     * @param request HelloRequest 包含发送者姓名和消息内容
+     * @return HelloResponse 包含服务器回复和处理状态
+     * 
+     * 此方法在 Go 中的签名：
+     *   SayHello(context.Context, *HelloRequest) (*HelloResponse, error)
+     * 
+     * 实现要求：
+     * 1. 接收客户端的问候请求
+     * 2. 处理请求中的姓名和消息
+     * 3. 生成个性化的回复消息
+     * 4. 返回回复和处理状态
+     * 5. 处理可能的错误情况
+     */
     rpc SayHello(HelloRequest) returns (HelloResponse);
 }
