@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# 查找依赖
+find_dependency(PkgConfig REQUIRED)
+pkg_check_modules(PROTOBUF_PKG REQUIRED protobuf)
+
+# 包含目标文件
+include("${CMAKE_CURRENT_LIST_DIR}/litegrpcTargets.cmake")
+
+check_required_components(litegrpc)
