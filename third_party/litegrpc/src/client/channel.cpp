@@ -215,6 +215,9 @@ Status LiteGrpcChannel::ExecuteRequest(
     headers["te"] = "trailers";                          // 支持 trailers
     headers["user-agent"] = Config::DEFAULT_USER_AGENT;  // 用户代理
     
+    // 设置 :authority 伪头部（gRPC 协议要求）
+    headers[":authority"] = connection_->host + ":" + std::to_string(connection_->port);
+    
     // 添加自定义元数据
     if (context) {
         // 添加用户定义的元数据

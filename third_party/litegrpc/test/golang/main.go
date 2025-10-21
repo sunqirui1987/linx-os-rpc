@@ -1,120 +1,267 @@
 /**
  * @file main.go
- * @brief 设备端 Hello 能力服务实现
+ * @brief 云端 Hello 能力调用服务实现
  * 
- * 此文件实现了设备端的 Hello 能力服务，模拟真实设备提供 Hello 功能。
- * 作为设备端，接收并响应来自 C++ LiteGRPC 客户端的 Hello 能力调用请求。
+ * 此文件实现了云端服务，作为RPC调用方主动调用设备端的Hello能力。
+ * 正确的架构：云端作为调用方，设备端作为服务提供方。
  * 
- * 设备端功能：
- * - 实现设备的 Hello 能力，提供 SayHello RPC 方法
- * - 接收来自客户端的 Hello 调用请求
- * - 模拟设备响应客户端的 Hello 能力调用
+ * 云端功能：
+ * - 接受设备端连接和注册
+ * - 管理已连接的设备列表
+ * - 主动调用设备端的Hello能力
+ * - 提供设备工具调用接口
  * - 支持环境变量配置监听端口
- * - 提供详细的设备端日志输出
  * 
  * 使用方法：
- *   go run main.go                    # 设备端默认监听 50051 端口
- *   PORT=50052 go run main.go         # 设备端监听 50052 端口
+ *   go run main.go                    # 云端默认监听 50051 端口
+ *   PORT=50052 go run main.go         # 云端监听 50052 端口
  * 
  * 测试场景：
- * - LiteGRPC 客户端与设备端的双向通信测试
- * - 设备端 Hello 能力的功能验证
- * - 中文消息在设备端的处理测试
- * - 设备端并发处理能力测试
+ * - 设备端连接到云端并注册Hello能力
+ * - 云端主动调用设备端的Hello能力
+ * - 验证"反向gRPC"架构的正确性
  * 
  * @author LiteGRPC Team
  * @date 2024
- * @version 1.0
+ * @version 2.0
  */
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	pb "hello-server/hello"  // 导入生成的 protobuf 代码
 )
 
 /**
- * @brief HelloServer 结构体 - 设备端 Hello 能力实现
- * 
- * 实现设备端的 Hello 能力服务，模拟真实设备的 Hello 功能。
- * 作为设备端服务提供者，响应来自客户端的 Hello 能力调用请求。
- * 嵌入 UnimplementedHelloServiceServer 以确保向前兼容性，
- * 当 proto 文件添加新的设备能力方法时，不会破坏现有实现。
+ * @brief Device 结构体 - 已连接设备信息
  */
-type HelloServer struct {
-	pb.UnimplementedHelloServiceServer  // 嵌入未实现的服务器，提供向前兼容性
+type Device struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	IPAddress      string    `json:"ip_address"`
+	Port           int32     `json:"port"`
+	Status         string    `json:"status"`
+	LastHeartbeat  time.Time `json:"last_heartbeat"`
+	AvailableTools []string  `json:"available_tools"`
 }
 
 /**
- * @brief SayHello RPC 方法实现 - 设备端 Hello 能力响应
- * @param ctx 上下文，用于控制请求的生命周期和取消
- * @param req HelloRequest 请求消息，包含客户端发送的姓名和消息
- * @return HelloResponse 响应消息和可能的错误
- * 
- * 此方法实现了设备端 Hello 能力的核心响应逻辑：
- * 1. 接收并记录来自客户端的 Hello 能力调用请求
- * 2. 模拟设备处理 Hello 请求，构造设备端回复消息
- * 3. 创建设备响应对象并设置处理状态码
- * 4. 记录设备端响应内容并返回给客户端
- * 
- * 设备端特性：
- * - 模拟真实设备的 Hello 能力响应行为
- * - 支持中文和多语言消息在设备端的处理
- * - 提供详细的设备端请求/响应日志
- * - 返回结构化的设备处理状态信息
- * - 处理各种字符编码的设备端消息
+ * @brief DeviceManager 结构体 - 设备管理器
  */
-func (s *HelloServer) SayHello(ctx context.Context, req *pb.HelloRequest) (*pb.HelloResponse, error) {
-	// 记录设备端收到的 Hello 能力调用请求
-	log.Printf("设备端收到 Hello 能力调用: name=%s, message=%s", req.GetName(), req.GetMessage())
+type DeviceManager struct {
+	devices map[string]*Device
+	mutex   sync.RWMutex
+}
+
+/**
+ * @brief NewDeviceManager 创建新的设备管理器
+ */
+func NewDeviceManager() *DeviceManager {
+	return &DeviceManager{
+		devices: make(map[string]*Device),
+	}
+}
+
+/**
+ * @brief RegisterDevice 注册设备
+ */
+func (dm *DeviceManager) RegisterDevice(device *Device) {
+	dm.mutex.Lock()
+	defer dm.mutex.Unlock()
+	dm.devices[device.ID] = device
+	log.Printf("设备已注册: %s (%s)", device.ID, device.Name)
+}
+
+/**
+ * @brief GetDevice 获取设备信息
+ */
+func (dm *DeviceManager) GetDevice(deviceID string) (*Device, error) {
+	dm.mutex.RLock()
+	defer dm.mutex.RUnlock()
+	device, exists := dm.devices[deviceID]
+	if !exists {
+		return nil, fmt.Errorf("device not found: %s", deviceID)
+	}
+	return device, nil
+}
+
+/**
+ * @brief ListDevices 列出所有设备
+ */
+func (dm *DeviceManager) ListDevices() []*Device {
+	dm.mutex.RLock()
+	defer dm.mutex.RUnlock()
+	devices := make([]*Device, 0, len(dm.devices))
+	for _, device := range dm.devices {
+		devices = append(devices, device)
+	}
+	return devices
+}
+
+/**
+ * @brief HelloCloudServer 结构体 - 云端Hello调用服务实现
+ * 
+ * 实现云端服务，作为RPC调用方主动调用设备端的Hello能力。
+ * 与传统gRPC不同，这里云端是调用方，设备端是服务提供方。
+ */
+type HelloCloudServer struct {
+	pb.UnimplementedHelloServiceServer
+	deviceManager *DeviceManager
+}
+
+/**
+ * @brief NewHelloCloudServer 创建新的云端Hello服务
+ */
+func NewHelloCloudServer() *HelloCloudServer {
+	return &HelloCloudServer{
+		deviceManager: NewDeviceManager(),
+	}
+}
+
+/**
+ * @brief RegisterDevice RPC方法 - 设备注册接口
+ * 
+ * 设备端连接到云端时调用此方法进行注册，告知云端自己的Hello能力。
+ */
+func (s *HelloCloudServer) RegisterDevice(ctx context.Context, req *pb.HelloRequest) (*pb.HelloResponse, error) {
+	// 解析设备注册信息（使用HelloRequest的字段模拟设备信息）
+	deviceID := req.GetName()
+	deviceInfo := req.GetMessage()
 	
-	// 模拟设备端处理 Hello 请求，构造设备回复消息
-	reply := fmt.Sprintf("设备端 Hello 响应: Hello %s! 设备已收到你的消息: %s", req.GetName(), req.GetMessage())
+	log.Printf("云端收到设备注册请求: device_id=%s, info=%s", deviceID, deviceInfo)
 	
-	// 创建设备端响应对象
-	response := &pb.HelloResponse{
-		Reply:  reply,
-		Status: 0, // 0 表示设备端成功处理
+	// 创建设备对象
+	device := &Device{
+		ID:             deviceID,
+		Name:           fmt.Sprintf("Hello设备_%s", deviceID),
+		IPAddress:      "127.0.0.1", // 简化实现，实际应从连接中获取
+		Port:           50051,
+		Status:         "connected",
+		LastHeartbeat:  time.Now(),
+		AvailableTools: []string{"say_hello"}, // 设备提供Hello能力
 	}
 	
-	// 记录设备端发送的响应信息
-	log.Printf("设备端发送响应: %s", reply)
-	return response, nil
+	// 注册设备
+	s.deviceManager.RegisterDevice(device)
+	
+	// 返回注册成功响应
+	reply := fmt.Sprintf("云端确认: 设备 %s 已成功注册Hello能力", deviceID)
+	return &pb.HelloResponse{
+		Reply:  reply,
+		Status: 0, // 0 表示成功
+	}, nil
 }
 
 /**
- * @brief 主函数 - 设备端 Hello 能力服务启动入口
+ * @brief SayHello RPC方法 - 云端调用设备Hello能力的接口
  * 
- * 设备端服务主要功能：
- * 1. 解析环境变量配置设备端监听端口
- * 2. 创建设备端 TCP 监听器
- * 3. 初始化设备端 gRPC 服务器
- * 4. 注册设备端 Hello 能力服务
- * 5. 启动设备端服务并开始监听客户端的 Hello 能力调用
+ * 此方法被外部调用，云端收到请求后会转发给已注册的设备端。
+ * 这里演示了"反向调用"：云端作为中介，调用设备端的Hello能力。
+ */
+func (s *HelloCloudServer) SayHello(ctx context.Context, req *pb.HelloRequest) (*pb.HelloResponse, error) {
+	log.Printf("云端收到Hello调用请求: name=%s, message=%s", req.GetName(), req.GetMessage())
+	
+	// 获取可用设备列表
+	devices := s.deviceManager.ListDevices()
+	if len(devices) == 0 {
+		return &pb.HelloResponse{
+			Reply:  "云端错误: 没有可用的Hello设备",
+			Status: 404,
+		}, nil
+	}
+	
+	// 选择第一个可用设备（简化实现）
+	device := devices[0]
+	log.Printf("云端选择设备: %s 来处理Hello请求", device.ID)
+	
+	// 调用设备端的Hello能力
+	result, err := s.callDeviceHello(device, req.GetName(), req.GetMessage())
+	if err != nil {
+		return &pb.HelloResponse{
+			Reply:  fmt.Sprintf("云端调用设备失败: %v", err),
+			Status: 500,
+		}, nil
+	}
+	
+	log.Printf("云端收到设备响应: %s", result)
+	return &pb.HelloResponse{
+		Reply:  fmt.Sprintf("云端转发设备响应: %s", result),
+		Status: 0,
+	}, nil
+}
+
+/**
+ * @brief callDeviceHello 调用设备Hello能力的内部方法
+ * 
+ * 模拟云端调用设备端Hello能力的过程。
+ * 在实际实现中，这里会通过网络调用设备的具体Hello接口。
+ */
+func (s *HelloCloudServer) callDeviceHello(device *Device, name, message string) (string, error) {
+	log.Printf("云端正在调用设备 %s 的Hello能力...", device.ID)
+	
+	// 检查设备是否支持Hello能力
+	hasHelloTool := false
+	for _, tool := range device.AvailableTools {
+		if tool == "say_hello" {
+			hasHelloTool = true
+			break
+		}
+	}
+	
+	if !hasHelloTool {
+		return "", fmt.Errorf("设备 %s 不支持Hello能力", device.ID)
+	}
+	
+	// 模拟网络调用延迟
+	time.Sleep(100 * time.Millisecond)
+	
+	// 模拟设备端Hello响应
+	// 在实际实现中，这里会通过gRPC客户端调用设备端的Hello服务
+	deviceResponse := map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("设备端Hello响应: Hello %s! 设备 %s 已收到你的消息: %s", 
+			name, device.ID, message),
+		"device_id": device.ID,
+		"timestamp": time.Now().Unix(),
+	}
+	
+	responseBytes, _ := json.Marshal(deviceResponse)
+	return string(responseBytes), nil
+}
+
+/**
+ * @brief 主函数 - 云端Hello调用服务启动入口
+ * 
+ * 云端服务主要功能：
+ * 1. 启动gRPC服务器，接受设备端连接
+ * 2. 提供设备注册接口
+ * 3. 提供Hello能力调用接口（转发给设备端）
+ * 4. 管理已连接设备的状态
  * 
  * 环境变量支持：
- * - PORT: 指定设备端监听端口（默认：50051）
+ * - PORT: 指定云端监听端口（默认：50051）
  * 
  * 使用示例：
- *   go run main.go                    # 设备端监听 50051 端口
- *   PORT=50052 go run main.go         # 设备端监听 50052 端口
- *   PORT=8080 go run main.go          # 设备端监听 8080 端口
+ *   go run main.go                    # 云端监听 50051 端口
+ *   PORT=50052 go run main.go         # 云端监听 50052 端口
  * 
- * 设备端服务特性：
- * - 支持多客户端并发调用设备 Hello 能力
- * - 自动处理客户端连接管理
- * - 提供详细的设备端启动和运行日志
- * - 优雅的设备端错误处理和退出
- * - 模拟真实设备的 Hello 能力响应行为
+ * 云端服务特性：
+ * - 作为RPC调用方，主动调用设备端Hello能力
+ * - 支持多设备连接和管理
+ * - 提供设备注册和能力发现
+ * - 实现"反向gRPC"架构模式
  */
 func main() {
-	// 从环境变量获取监听端口，支持灵活配置
+	// 从环境变量获取监听端口
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "50051"  // 默认端口
@@ -128,21 +275,35 @@ func main() {
 	}
 
 	// 创建 gRPC 服务器实例
-	// 使用默认配置，支持 HTTP/2 和标准 gRPC 协议
 	s := grpc.NewServer()
 
-	// 注册 HelloService 服务实现
-	// 将我们的 HelloServer 实例注册到 gRPC 服务器
-	pb.RegisterHelloServiceServer(s, &HelloServer{})
+	// 注册云端Hello服务实现
+	cloudService := NewHelloCloudServer()
+	pb.RegisterHelloServiceServer(s, cloudService)
 
-	// 输出设备端服务启动信息
-	log.Printf("设备端 Hello 能力服务启动，监听端口 %s", address)
-	log.Printf("等待 C++ 客户端调用设备 Hello 能力...")
-	log.Printf("设备端支持的能力方法: SayHello")
+	// 输出云端服务启动信息
+	log.Printf("云端Hello调用服务启动，监听端口 %s", address)
+	log.Printf("等待设备端连接并注册Hello能力...")
+	log.Printf("云端支持的接口:")
+	log.Printf("  - RegisterDevice: 设备注册Hello能力")
+	log.Printf("  - SayHello: 调用设备端Hello能力")
+	log.Printf("架构模式: 云端作为调用方，设备端作为服务提供方")
 
-	// 启动设备端服务并开始接受客户端的 Hello 能力调用
-	// 此调用会阻塞，直到设备端服务关闭或发生错误
+	// 启动定时任务：演示云端主动调用设备Hello能力
+	go func() {
+		time.Sleep(5 * time.Second) // 等待设备连接
+		for {
+			time.Sleep(10 * time.Second)
+			devices := cloudService.deviceManager.ListDevices()
+			if len(devices) > 0 {
+				log.Printf("云端定时任务: 发现 %d 个已连接设备", len(devices))
+				// 这里可以添加定时调用设备Hello能力的逻辑
+			}
+		}
+	}()
+
+	// 启动云端服务并开始接受设备端连接
 	if err := s.Serve(lis); err != nil {
-		log.Fatalf("设备端服务启动失败: %v", err)
+		log.Fatalf("云端服务启动失败: %v", err)
 	}
 }

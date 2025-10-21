@@ -10,10 +10,14 @@ find_package(Protobuf REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(OpenSSL REQUIRED)
 
+# 查找 jsoncpp
+pkg_check_modules(JSONCPP REQUIRED jsoncpp)
+
 # 设置包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../nanopb)
+include_directories(${JSONCPP_INCLUDE_DIRS})
 
 # 添加 litegrpc 库路径
 set(LITEGRPC_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
@@ -49,19 +53,13 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
 
-# 定义可执行文件：Hello 客户端
+# 定义可执行文件：Hello 客户端（简化版本）
 add_executable(hello_client
     hello_client.cpp
-    hello.pb.c
-    ${LITEGRPC_SOURCES}
-    ${NANOPB_SOURCES}
 )
 
-# 链接库
+# 链接库（简化版本）
 target_link_libraries(hello_client
-    ${Protobuf_LIBRARIES}
-    OpenSSL::SSL
-    OpenSSL::Crypto
     pthread
 )
 

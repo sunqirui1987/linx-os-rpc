@@ -32,6 +32,8 @@
 #include <openssl/err.h>   // OpenSSL 错误处理
 #include <cstring>         // C 字符串函数
 #include <iostream>        // 标准输入输出流
+#include <thread>          // 线程支持
+#include <chrono>          // 时间支持
 
 namespace litegrpc {
 namespace http2 {
@@ -270,6 +272,20 @@ Status Http2Client::SendRequest(
         7, static_cast<size_t>(state_->use_ssl ? 5 : 4), NGHTTP2_NV_FLAG_NONE
     };
     nva.push_back(scheme_nv);
+    
+    // 添加 :authority 伪头部（必需的 gRPC 协议要求）
+    // 从 headers 中查找 :authority，如果没有则使用默认值
+    std::string authority_value = "localhost";  // 默认值
+    auto authority_it = headers.find(":authority");
+    if (authority_it != headers.end()) {
+        authority_value = authority_it->second;
+    }
+    
+    nghttp2_nv authority_nv = {
+        (uint8_t*)":authority", (uint8_t*)authority_value.c_str(),
+        10, authority_value.length(), NGHTTP2_NV_FLAG_NONE
+    };
+    nva.push_back(authority_nv);
     
     // 第四步：添加自定义 HTTP 头部
     // 使用 header_storage 确保字符串在 nghttp2_nv 使用期间保持有效
@@ -558,7 +574,12 @@ Status Http2Client::ReceiveData() {
  * 正确发送和接收。
  */
 Status Http2Client::ProcessEvents() {
-    while (true) {
+    int max_iterations = 100;  // 防止无限循环
+    int iteration_count = 0;
+    
+    while (iteration_count < max_iterations) {
+        iteration_count++;
+        
         // 发送待发送的数据
         auto status = SendData();
         if (!status.ok()) {
@@ -578,6 +599,13 @@ Status Http2Client::ProcessEvents() {
                 return status;
             }
         }
+        
+        // 添加短暂延迟避免忙等待
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    
+    if (iteration_count >= max_iterations) {
+        return Status::Internal("ProcessEvents exceeded maximum iterations");
     }
     
     return Status::OK();
